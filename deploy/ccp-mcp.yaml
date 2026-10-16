@@ -1,0 +1,68 @@
+# ccp-mcp：CCP 平台的 MCP 网关（独立项目）
+#
+# 2026-10-18 用户「mcp 拿出来单独作为一个项目 ccp-mcp」。
+# 与 ccp-backend 的关系：令牌库自有（PVC 落盘）；工具调用经 HTTP 打到 ccp-backend
+# （Service ccp-backend:8010），每条调用一换一铸 5 分钟 session，以令牌属主身份跑——
+# 权限 / 可见范围 / 计费拦截与控制台同一套。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccp-mcp
+  namespace: ccp-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: ccp-mcp }
+  template:
+    metadata:
+      labels: { app: ccp-mcp }
+    spec:
+      containers:
+        - name: ccp-mcp
+          image: reg.hpcweb.cc/ccp/ccp-mcp:v1.0.0
+          ports:
+            - containerPort: 8020
+              name: http
+          env:
+            - name: CCP_MCP_BACKEND
+              value: "http://ccp-backend.ccp-system.svc:8010"
+            - name: CCP_MCP_INTERNAL_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ccp-internal-key
+                  key: key
+                  optional: false
+            - name: CCP_MCP_DATA_PATH
+              value: "/data/tokens.json"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet: { path: /mcp, port: 8020 }   # 405 也是就绪（只认 POST）
+          livenessProbe:
+            httpGet: { path: /mcp, port: 8020 }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: ccp-mcp-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ccp-mcp
+  namespace: ccp-system
+spec:
+  selector: { app: ccp-mcp }
+  ports:
+    - name: http
+      port: 8020
+      targetPort: 8020
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ccp-mcp-data
+  namespace: ccp-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 100Mi }
