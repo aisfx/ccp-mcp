@@ -36,15 +36,37 @@ class TokenRecord(BaseModel):
 
 
 class TokenStore:
-    """线程安全的极简 JSON 存储：写时整体落盘，启动时读回。"""
+    """线程安全的极简 JSON 存储：写时整体落盘，启动时读回。
+
+    两副本共一份 NFS：读前对 mtime，文件被另一个副本写过就重装（同 ccp-backend
+    的 reload_if_stale 协议）；写后落盘 + 更新自己的 mtime 快照。
+    """
 
     def __init__(self, path: str = "") -> None:
         self._path = Path(path) if path else None
         self._lock = threading.Lock()
+        self._seen_mtime: float | None = None
         self.tokens: list[TokenRecord] = []
-        if self._path and self._path.exists():
+        self.reload_if_stale(force=True)
+
+    def reload_if_stale(self, force: bool = False) -> bool:
+        """文件比内存新就重装；返回是否重装了。没有文件路径（测试）时永远 False。"""
+        if self._path is None:
+            return False
+        try:
+            mtime = self._path.stat().st_mtime
+        except FileNotFoundError:
+            return False
+        if not force and mtime == self._seen_mtime:
+            return False
+        try:
             raw = json.loads(self._path.read_text())
-            self.tokens = [TokenRecord(**item) for item in raw]
+            tokens = [TokenRecord(**item) for item in raw]
+        except (OSError, ValueError):
+            return False  # 另一副本写到一半：拿旧内存态，下一个请求再试
+        self.tokens = tokens
+        self._seen_mtime = mtime
+        return True
 
     # ------------------------------------------------------------------ 基础
 
@@ -60,6 +82,7 @@ class TokenStore:
             )
         )
         tmp.replace(self._path)
+        self._seen_mtime = self._path.stat().st_mtime
 
     def _hash(secret: str) -> str:  # noqa: N805 - 与 ccp 侧同一写法
         return hashlib.sha256(secret.encode()).hexdigest()

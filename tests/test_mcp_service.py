@@ -180,3 +180,30 @@ def test_tool_business_error_is_error(client):
     result = resp.json()["result"]
     assert result["isError"] is True
     assert "租户计费已暂停" in result["content"][0]["text"]
+
+
+# ------------------------------------------------------------------ 两副本同步
+
+
+def test_two_replicas_share_file(tmp_path):
+    """副本 B 在 A 写过之后 reload_if_stale 能看到新令牌（NFS 同一份文件）。"""
+    path = str(tmp_path / "tokens.json")
+    cfg = Settings(internal_key="test-key", backend="http://backend.test", data_path=path)
+    from app.main import create_app as _create
+
+    a = TestClient(_create(cfg, TokenStore(path)))
+    b = TestClient(_create(cfg, TokenStore(path)))
+    h = {**INTERNAL, "X-CCP-User": "sunfx"}
+
+    created = a.post("/admin/tokens", json={"name": "by-a"}, headers=h).json()["data"]
+    # B 副本没 reload 前看不到；请求进来（gate 里 reload_if_stale）就看到了
+    assert b.get("/admin/tokens", headers=h).json()["data"]["total"] == 1
+    assert b.delete(f"/admin/tokens/{created['id']}", headers=h).status_code == 200
+    # /mcp 认证同样先 reload：A 再发一枚，B 上立刻能用
+    second = a.post("/admin/tokens", json={"name": "by-a-2"}, headers=h).json()["data"]
+    ok = b.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+        headers={"Authorization": f"Bearer {second['secret']}"},
+    )
+    assert ok.json()["result"] == {}

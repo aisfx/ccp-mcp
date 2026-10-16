@@ -10,7 +10,7 @@ metadata:
   name: ccp-mcp
   namespace: ccp-system
 spec:
-  replicas: 2
+  replicas: 1  # 令牌库 JSON 落盘 + NFS mtime 同步挡不住写-写竞争（丢更新），单副本最稳；MCP 认证流量小，可用性损失可忽略
   selector:
     matchLabels: { app: ccp-mcp }
   template:

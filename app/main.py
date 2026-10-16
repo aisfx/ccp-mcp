@@ -52,12 +52,17 @@ def _fail(code: str, message: str, status: int = 400, show_type: int = 0) -> JSO
 def _register_admin(app: FastAPI) -> None:
     @app.middleware("http")
     async def _gate(request: Request, call_next):
-        """admin 路由的互信门：X-CCP-Internal-Key 对了才放行。"""
+        """admin 路由的互信门：X-CCP-Internal-Key 对了才放行。
+
+        两副本共一份 NFS 上的 tokens.json：每个请求进来先看文件 mtime，另一副本
+        写过就重装内存（否则分载到 B 副本看不到 A 副本刚发的令牌）。
+        """
         if request.url.path.startswith("/admin"):
             expected = app.state.settings.internal_key
             got = request.headers.get("X-CCP-Internal-Key", "")
             if not expected or got != expected:
                 return _fail("unauthorized", "内部 key 不对", 401)
+        app.state.store.reload_if_stale()
         return await call_next(request)
 
     @app.get("/admin/tokens")
@@ -130,6 +135,7 @@ def _register_rpc(app: FastAPI) -> None:
 
     @app.post("/mcp")
     async def mcp_rpc(request: Request) -> JSONResponse:
+        app.state.store.reload_if_stale()  # 另一副本刚发的令牌也能认证
         record = app.state.store.resolve(_bearer(request.headers.get("Authorization")))
         if record is None:
             return JSONResponse(
