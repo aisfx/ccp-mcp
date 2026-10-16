@@ -185,7 +185,7 @@ async def run_tool(name: str, args: dict[str, Any], user: str, settings) -> str:
 
 
 async def t_cluster_overview(args: dict, p: Platform) -> str:
-    data = await p.get("/me/overview")
+    data = await p.get("/overview")
     nodes, cpu, mem, gpu = data["nodes"], data["cpu"], data["gpu"], data["memory"]
     lines = [
         f"集群总览：节点 {nodes['ready']}/{nodes['total']} 台就绪",
