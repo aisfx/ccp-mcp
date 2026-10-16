@@ -16,8 +16,6 @@ class Settings(BaseSettings):
     internal_key: str = ""
     # 令牌库：JSON 文件路径（PVC 挂载点）；空 = 纯内存（联调 / 测试）
     data_path: str = ""
-    # 服务端口
-    port: int = 8020
 
 
 @lru_cache

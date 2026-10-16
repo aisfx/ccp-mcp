@@ -29,17 +29,13 @@ def create_app(
     settings: Settings | None = None, store: TokenStore | None = None
 ) -> FastAPI:
     cfg = settings or get_settings()
-    app = FastAPI(title="ccp-mcp", lifespan=lambda _: _noop())
+    app = FastAPI(title="ccp-mcp")
     app.state.settings = cfg
     app.state.store = store or TokenStore(cfg.data_path)
     _register_admin(app)
     _register_rpc(app)
     _register_tools(app)
     return app
-
-
-async def _noop() -> None:
-    pass
 
 
 def _fail(code: str, message: str, status: int = 400, show_type: int = 0) -> JSONResponse:
@@ -217,8 +213,12 @@ class ToolError(Exception):
     """业务校验失败：包成 isError=true 给 AI 看下一步怎么办。"""
 
 
-def _register_tools(app: FastAPI) -> None:  # 占位：工具注册放 app/tools.py
-    pass
+def _register_tools(app: FastAPI) -> None:
+    """就绪 / 存活探针（GET /healthz——/mcp 只认 POST，探针打 405 会误判）。"""
+
+    @app.get("/healthz")
+    async def healthz() -> dict[str, str]:
+        return {"status": "ok"}
 
 
 # JSON 输出统一 ensure_ascii=False（中文可读）
