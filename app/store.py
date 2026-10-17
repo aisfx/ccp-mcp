@@ -123,10 +123,12 @@ class TokenStore:
 
     def _pg_flush(self) -> None:
         """内存态整表对齐 PG：删掉不在内存的行 + upsert 全部行（写频率低，全量无压力）。"""
+        from psycopg.types.json import Json
+
         with self._db.cursor() as cur:
             ids = tuple(t.id for t in self.tokens)
             if ids:
-                cur.execute("delete from mcp_tokens where id not in %s", (ids,))
+                cur.execute("delete from mcp_tokens where id != all(%s)", (list(ids),))
             else:
                 cur.execute("delete from mcp_tokens")
             for i, t in enumerate(self.tokens):
@@ -138,7 +140,7 @@ class TokenStore:
                         name = excluded.name, prefix = excluded.prefix,
                         state = excluded.state, sort = excluded.sort, data = excluded.data
                     """,
-                    (t.id, t.name, t.prefix, t.state, len(self.tokens) - i, t.model_dump(mode="json")),
+                    (t.id, t.name, t.prefix, t.state, len(self.tokens) - i, Json(t.model_dump(mode="json"))),
                 )
 
     def _hash(secret: str) -> str:  # noqa: N805 - 与 ccp 侧同一写法
