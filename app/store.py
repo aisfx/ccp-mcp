@@ -238,7 +238,8 @@ class TokenStore:
                 record = TokenRecord(**row[0])
                 if record.last_used_at is None:
                     cur.execute(
-                        "update mcp_tokens set data = jsonb_set(data, '{last_used_at}', to_jsonb(%s::text)) where id = %s",
+                        # data 列可能是 json（backend SQLModel 建的表）或 jsonb（自建），cast 一下两头都通
+                        "update mcp_tokens set data = jsonb_set(data::jsonb, '{last_used_at}', to_jsonb(%s::text)) where id = %s",
                         (now().isoformat(), record.id),
                     )
                 return record
