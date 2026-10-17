@@ -107,11 +107,14 @@ AI 客户端（Cursor / Claude / …）
 | `get_job` | 作业详情：状态、task 资源、Pod 列表、Pending 原因 | 排查为什么排队 |
 | `delete_job` | 删作业（未完成的按 Terminated 归档；仅限自己的 / 管理员） | 清理 / 停止 |
 | `list_gpu_instances` | 开发环境实例（GPU / 通用）：状态、规格、SSH 可达性 | 看自己在跑的实例 |
+| `my_bill` | 我的月账单：三类费用合计与明细，预付余额和授信额度 | 查这个月花了多少钱 |
+| `my_cost_trend` | 近 N 天每日费用趋势（算力 / Token / 存储） | 看钱花在哪天、哪类 |
 
 推荐的 AI 调用顺序（已写进 server instructions）：
 
 ```
 list_queues → list_projects → submit_job → get_job
+查费用：my_bill（月账单） / my_cost_trend（每日趋势）
 ```
 
 工具返回是**给 AI 看的文本**：列宽对齐、单位带上、数字带上下文，不是给前端的结构体。业务校验失败（如 `作业不存在：xxx`）以 `isError: true` 返回，AI 能据此自行纠错重试。
@@ -147,11 +150,9 @@ pytest -k token # 按名字过滤
 
 见 [`deploy/`](deploy/) 与 [`deploy/README.md`](deploy/README.md)：
 
-- `deploy/ccp-mcp.yaml`：Deployment + Service + PVC（令牌 JSON 模式挂 `/data`）
+- `deploy/ccp-mcp.yaml`：Deployment + Service + PVC（JSON 令牌库模式下挂载 `/data`），可作为模板按需修改命名空间、镜像地址与存储配置
 - 镜像：`Dockerfile`，基础镜像 `python:3.12-slim`，暴露 `8020`
-- Ingress：在 ccp-console 的 host 下**加一条 `/mcp` path** 指向本服务（优先级高于 `/`）
-
-改 Ingress 用 `kubectl patch` 单独加 path，**不要 apply 整个 ingress.yaml**（线上还有别的注解）。
+- 对外暴露：通过 Ingress / 网关将 `/mcp` 路径路由到本服务即可，健康检查走 `/healthz`
 
 ## 项目结构
 

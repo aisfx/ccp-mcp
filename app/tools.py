@@ -104,6 +104,26 @@ TOOLS: list[dict[str, Any]] = [
         "description": "我的开发环境实例（GPU 实例 / 通用实例）：状态、规格、卡型、SSH 可达性。",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "my_bill",
+        "description": "我的月账单：算力 / Token / 存储三类费用合计与明细，预付余额和授信额度。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "month": {"type": "string", "description": "账单月份，YYYY-MM（不填 = 当月）"},
+            },
+        },
+    },
+    {
+        "name": "my_cost_trend",
+        "description": "近 N 天每日费用趋势（算力 / Token / 存储），看钱花在哪天、哪类。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "回看天数（1–180，默认 30）", "default": 30},
+            },
+        },
+    },
 ]
 
 
@@ -362,6 +382,61 @@ async def t_list_gpu_instances(args: dict, p: Platform) -> str:
     return "\n".join(lines)
 
 
+async def t_my_bill(args: dict, p: Platform) -> str:
+    """GET /billing/me → BillSummary：三类费用 + 算力拆解 + 余额/授信 + 明细。"""
+    month = args.get("month")
+    data = await p.get("/billing/me", params={"month": month} if month else None)
+    lines = [
+        f"{data['month']} 账单（{data.get('tenant', '')}）：合计 {data['total']:.2f} 元",
+        f"- 算力 {data.get('computeCost', 0):.2f}"
+        f"（GPU {data.get('gpuCost', 0):.2f} / CPU {data.get('cpuCost', 0):.2f}"
+        f" / 内存 {data.get('memoryCost', 0):.2f} / 网络 {data.get('networkCost', 0):.2f}）",
+        f"- Token {data.get('tokenCost', 0):.2f}，存储 {data.get('storageCost', 0):.2f}",
+        f"预付余额 {data.get('balance', 0):.2f} 元，授信 {data.get('credit', 0):.2f} 元",
+    ]
+    items = data.get("items") or []
+    if items:
+        lines.append("费用明细：")
+        for it in items[:20]:
+            lines.append(
+                f"- [{it.get('kind', '?')}] {it.get('subject', '?')}："
+                f"{it.get('quantity', '')} → {it.get('amount', 0):.2f} 元（{it.get('detail', '')}）"
+            )
+        if len(items) > 20:
+            lines.append(f"（还有 {len(items) - 20} 项未列出，去控制台账单页看全部）")
+    meter = data.get("meter") or {}
+    if meter.get("note"):
+        lines.append(f"计费说明：{meter['note']}（来源：{meter.get('source', '?')}）")
+    return "\n".join(lines)
+
+
+async def t_my_cost_trend(args: dict, p: Platform) -> str:
+    """GET /billing/me/trend → page(list[UsagePoint])：按天汇总成三系列。"""
+    days = max(1, min(int(args.get("days") or 30), 180))
+    data = await p.get("/billing/me/trend", params={"days": days})
+    points = data.get("list") or [] if isinstance(data, dict) else (data or [])
+    by_day: dict[str, dict[str, float]] = {}
+    for pt in points:
+        day = by_day.setdefault(str(pt.get("time", "")), {})
+        day[str(pt.get("series", "?"))] = float(pt.get("value") or 0)
+    if not by_day:
+        return f"（近 {days} 天没有费用记录）"
+    lines = [f"近 {days} 天每日费用（元）："]
+    total = 0.0
+    for day in sorted(by_day):
+        series = by_day[day]
+        token_c = series.get("Token", 0.0)
+        compute = series.get("算力", 0.0)
+        storage = series.get("存储", 0.0)
+        total += token_c + compute + storage
+        lines.append(
+            f"- {day}：合计 {token_c + compute + storage:.2f}"
+            f"（算力 {compute:.2f} / Token {token_c:.2f} / 存储 {storage:.2f}）"
+        )
+    lines.append(f"合计：{total:.2f} 元")
+    return "\n".join(lines)
+
+
 _IMPL = {
     "cluster_overview": t_cluster_overview,
     "list_queues": t_list_queues,
@@ -372,4 +447,6 @@ _IMPL = {
     "get_job": t_get_job,
     "delete_job": t_delete_job,
     "list_gpu_instances": t_list_gpu_instances,
+    "my_bill": t_my_bill,
+    "my_cost_trend": t_my_cost_trend,
 }
