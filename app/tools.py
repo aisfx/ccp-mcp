@@ -8,6 +8,7 @@ MCP 工具：经 HTTP 调 ccp-backend 的 REST（/api/v1/*）。
 
 from __future__ import annotations
 
+import shlex
 from typing import Any
 
 import httpx
@@ -277,7 +278,7 @@ async def t_submit_job(args: dict, p: Platform) -> str:
                 "name": "main",
                 "replicas": replicas,
                 "image": str(args["image"]),
-                "command": [str(args["command"])],
+                "command": shlex.split(str(args["command"])),
                 "resources": resources,
             }
         ],
