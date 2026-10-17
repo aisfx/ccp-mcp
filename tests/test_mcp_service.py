@@ -207,3 +207,99 @@ def test_two_replicas_share_file(tmp_path):
         headers={"Authorization": f"Bearer {second['secret']}"},
     )
     assert ok.json()["result"] == {}
+
+
+@respx.mock
+def test_tool_my_bill(client):
+    """my_bill：解析 /billing/me 的 BillSummary 并渲染文本。"""
+    created = _issue(client, user="wang")
+    base = "http://backend.test"
+    respx.post(f"{base}/internal/sessions").respond(
+        200, json={"success": True, "data": {"token": "sess-1", "expiresIn": 300}}
+    )
+    respx.get(f"{base}/api/v1/billing/me").respond(
+        200,
+        json={
+            "success": True,
+            "data": {
+                "month": "2026-10",
+                "tenant": "acme",
+                "total": 123.45,
+                "tokenCost": 20.0,
+                "computeCost": 100.0,
+                "storageCost": 3.45,
+                "gpuCost": 60.0,
+                "cpuCost": 20.0,
+                "memoryCost": 10.0,
+                "networkCost": 10.0,
+                "balance": 1000.0,
+                "credit": 0.0,
+                "items": [
+                    {
+                        "id": "i1",
+                        "kind": "compute",
+                        "subject": "dev-1",
+                        "detail": "a100 机型",
+                        "quantity": "10 卡·时",
+                        "amount": 60.0,
+                    }
+                ],
+                "meter": {"source": "archive", "note": "OpenCost 不可用，本次按作业归档计算"},
+            },
+        },
+    )
+    resp = _rpc(client, created["secret"], "tools/call", {"name": "my_bill", "arguments": {}})
+    body = resp.json()["result"]
+    assert body.get("isError") is not True
+    text = body["content"][0]["text"]
+    assert "2026-10" in text and "123.45" in text and "acme" in text
+    assert "1000.00" in text and "GPU 60.00" in text
+    assert "dev-1" in text and "OpenCost 不可用" in text
+
+
+@respx.mock
+def test_tool_my_cost_trend(client):
+    """my_cost_trend：按天聚合三系列并给合计。"""
+    created = _issue(client, user="wang")
+    base = "http://backend.test"
+    respx.post(f"{base}/internal/sessions").respond(
+        200, json={"success": True, "data": {"token": "sess-1", "expiresIn": 300}}
+    )
+    respx.get(f"{base}/api/v1/billing/me/trend").respond(
+        200,
+        json={
+            "success": True,
+            "data": {
+                "list": [
+                    {"time": "2026-10-01", "series": "Token", "value": 1.2},
+                    {"time": "2026-10-01", "series": "算力", "value": 10.5},
+                    {"time": "2026-10-01", "series": "存储", "value": 0.6},
+                ],
+                "total": 3,
+            },
+        },
+    )
+    resp = _rpc(client, created["secret"], "tools/call", {"name": "my_cost_trend", "arguments": {"days": 7}})
+    body = resp.json()["result"]
+    assert body.get("isError") is not True
+    text = body["content"][0]["text"]
+    assert "近 7 天" in text and "2026-10-01" in text
+    assert "12.30" in text  # 1.2 + 10.5 + 0.6
+    assert "合计：12.30 元" in text
+
+
+@respx.mock
+def test_bill_error_passes_through(client):
+    """后端返回 success=false（如管理员无租户）时，错误信息原样给 AI。"""
+    created = _issue(client, user="wang")
+    base = "http://backend.test"
+    respx.post(f"{base}/internal/sessions").respond(
+        200, json={"success": True, "data": {"token": "sess-1", "expiresIn": 300}}
+    )
+    respx.get(f"{base}/api/v1/billing/me").respond(
+        200, json={"success": False, "data": None, "errorCode": "no_tenant", "errorMessage": "你没有所属租户，没有账单"}
+    )
+    resp = _rpc(client, created["secret"], "tools/call", {"name": "my_bill", "arguments": {}})
+    result = resp.json()["result"]
+    assert result["isError"] is True
+    assert "没有所属租户" in result["content"][0]["text"]
