@@ -42,12 +42,46 @@ class TokenStore:
     的 reload_if_stale 协议）；写后落盘 + 更新自己的 mtime 快照。
     """
 
-    def __init__(self, path: str = "") -> None:
+    def __init__(self, path: str = "", database_url: str | None = None) -> None:
+        self._db = None
         self._path = Path(path) if path else None
         self._lock = threading.Lock()
         self._seen_mtime: float | None = None
         self.tokens: list[TokenRecord] = []
-        self.reload_if_stale(force=True)
+        if database_url:
+            import psycopg
+
+            self._db = psycopg.connect(
+                database_url.replace("postgresql+psycopg://", "postgresql://"), autocommit=True
+            )
+            self._ensure_table()
+            self._pg_load()
+        else:
+            self.reload_if_stale(force=True)
+
+    # ------------------------------------------------------------------ PG 模式
+
+    def _ensure_table(self) -> None:
+        """建表（幂等）。schema 与 ccp-backend 的 McpTokenRow 对齐：data 放整条记录。"""
+        with self._db.cursor() as cur:
+            cur.execute(
+                """
+                create table if not exists mcp_tokens (
+                    id       text primary key,
+                    name     text not null default '',
+                    prefix   text not null default '',
+                    state    text not null default 'active',
+                    sort     integer not null default 0,
+                    data     jsonb not null default '{}'::jsonb
+                )
+                """
+            )
+            cur.execute("create index if not exists ix_mcp_tokens_state on mcp_tokens (state)")
+
+    def _pg_load(self) -> None:
+        with self._db.cursor() as cur:
+            cur.execute("select data from mcp_tokens order by sort desc")
+            self.tokens = [TokenRecord(**row[0]) for row in cur.fetchall()]
 
     def reload_if_stale(self, force: bool = False) -> bool:
         """文件比内存新就重装；返回是否重装了。没有文件路径（测试）时永远 False。"""
@@ -71,6 +105,9 @@ class TokenStore:
     # ------------------------------------------------------------------ 基础
 
     def _flush(self) -> None:
+        if self._db is not None:
+            self._pg_flush()
+            return
         if self._path is None:
             return
         tmp = self._path.with_suffix(".tmp")
@@ -83,6 +120,26 @@ class TokenStore:
         )
         tmp.replace(self._path)
         self._seen_mtime = self._path.stat().st_mtime
+
+    def _pg_flush(self) -> None:
+        """内存态整表对齐 PG：删掉不在内存的行 + upsert 全部行（写频率低，全量无压力）。"""
+        with self._db.cursor() as cur:
+            ids = tuple(t.id for t in self.tokens)
+            if ids:
+                cur.execute("delete from mcp_tokens where id not in %s", (ids,))
+            else:
+                cur.execute("delete from mcp_tokens")
+            for i, t in enumerate(self.tokens):
+                cur.execute(
+                    """
+                    insert into mcp_tokens (id, name, prefix, state, sort, data)
+                    values (%s, %s, %s, %s, %s, %s)
+                    on conflict (id) do update set
+                        name = excluded.name, prefix = excluded.prefix,
+                        state = excluded.state, sort = excluded.sort, data = excluded.data
+                    """,
+                    (t.id, t.name, t.prefix, t.state, len(self.tokens) - i, t.model_dump(mode="json")),
+                )
 
     def _hash(secret: str) -> str:  # noqa: N805 - 与 ccp 侧同一写法
         return hashlib.sha256(secret.encode()).hexdigest()
@@ -112,6 +169,8 @@ class TokenStore:
         return record, secret
 
     def get(self, token_id: str) -> TokenRecord | None:
+        if self._db is not None:
+            self._pg_load()
         return next((t for t in self.tokens if t.id == token_id), None)
 
     def revoke(self, record: TokenRecord) -> None:
@@ -125,6 +184,8 @@ class TokenStore:
             self._flush()
 
     def list_for(self, user: str, is_admin: bool) -> list[TokenRecord]:
+        if self._db is not None:
+            self._pg_load()
         if is_admin:
             return list(self.tokens)
         return [t for t in self.tokens if t.user == user]
@@ -146,8 +207,11 @@ class TokenStore:
                     record.state = "revoked"
                     applied.append(token_id)
                 elif action == "purge" and record.state == "revoked":
-                    self.tokens = [t for t in self.tokens if t.id != token_id]
+                    self.tokens = [t for t in self.tokens if t.id != record.id]
                     applied.append(token_id)
+                    if self._db is not None:  # 直接删，不等 _flush（内存已不含该行）
+                        with self._db.cursor() as cur:
+                            cur.execute("delete from mcp_tokens where id = %s", (record.id,))
                 else:
                     (skipped if action == "revoke" else rejected).append(token_id)
             self._flush()
@@ -160,6 +224,22 @@ class TokenStore:
         if not secret or not secret.startswith(TOKEN_PREFIX):
             return None
         digest = TokenStore._hash(secret)
+        if self._db is not None:
+            with self._db.cursor() as cur:
+                cur.execute(
+                    "select data from mcp_tokens where state = 'active' and data->>'secret_hash' = %s",
+                    (digest,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                record = TokenRecord(**row[0])
+                if record.last_used_at is None:
+                    cur.execute(
+                        "update mcp_tokens set data = jsonb_set(data, '{last_used_at}', to_jsonb(%s::text)) where id = %s",
+                        (now().isoformat(), record.id),
+                    )
+                return record
         record = next(
             (t for t in self.tokens if t.state == "active" and t.secret_hash == digest), None
         )

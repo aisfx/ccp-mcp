@@ -14,7 +14,11 @@ class Settings(BaseSettings):
     backend: str = "http://127.0.0.1:8010"
     # 服务互信：与 ccp-backend 的 CCP_INTERNAL_KEY 相同才放行内部端点
     internal_key: str = ""
-    # 令牌库：JSON 文件路径（PVC 挂载点）；空 = 纯内存（联调 / 测试）
+    # 令牌库三选一（2026-10-18 用户「把数据全部都存储到 pg 数据库上面去」）：
+    #   database_url：生产。PG（与 ccp-backend 同一个库，另一张表）；多副本不再丢更新
+    #   data_path：JSON 文件（开发/单副本）。两者都配时 PG 优先
+    #   都空：纯内存（联调 / 测试）
+    database_url: str | None = None
     data_path: str = ""
 
 

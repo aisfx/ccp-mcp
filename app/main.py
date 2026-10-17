@@ -31,7 +31,13 @@ def create_app(
     cfg = settings or get_settings()
     app = FastAPI(title="ccp-mcp")
     app.state.settings = cfg
-    app.state.store = store or TokenStore(cfg.data_path)
+    # PG（生产）> JSON 文件（开发）> 内存（测试）
+    if store is not None:
+        app.state.store = store
+    elif cfg.database_url:
+        app.state.store = TokenStore(database_url=cfg.database_url)
+    else:
+        app.state.store = TokenStore(cfg.data_path)
     _register_admin(app)
     _register_rpc(app)
     _register_tools(app)
