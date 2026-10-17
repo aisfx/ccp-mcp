@@ -1,9 +1,8 @@
 # ccp-mcp：CCP 平台的 MCP 网关（独立项目）
 #
-# 2026-10-18 用户「mcp 拿出来单独作为一个项目 ccp-mcp」。
-# 与 ccp-backend 的关系：令牌库自有（PVC 落盘）；工具调用经 HTTP 打到 ccp-backend
-# （Service ccp-backend:8010），每条调用一换一铸 5 分钟 session，以令牌属主身份跑——
-# 权限 / 可见范围 / 计费拦截与控制台同一套。
+# 与 ccp-backend 的关系：令牌库自有（PG 或 PVC 落盘）；工具调用经 HTTP 打到
+# ccp-backend（Service ccp-backend:8010），每条调用一换一铸 5 分钟 session，
+# 以令牌属主身份跑——权限 / 可见范围 / 计费拦截与控制台同一套。
 apiVersion: apps/v1
 kind: Deployment
 metadata:
