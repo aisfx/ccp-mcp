@@ -9,7 +9,8 @@ metadata:
   name: ccp-mcp
   namespace: ccp-system
 spec:
-  replicas: 1  # 令牌库 JSON 落盘 + NFS mtime 同步挡不住写-写竞争（丢更新），单副本最稳；MCP 认证流量小，可用性损失可忽略
+  # PG 模式（2026-10-18）读写直查库，多副本不再丢更新——回到 2 副本
+  replicas: 2  # 令牌库 JSON 落盘 + NFS mtime 同步挡不住写-写竞争（丢更新），单副本最稳；MCP 认证流量小，可用性损失可忽略
   selector:
     matchLabels: { app: ccp-mcp }
   template:
@@ -23,6 +24,9 @@ spec:
             - containerPort: 8020
               name: http
           env:
+          # 令牌库走 PG（与 ccp-backend 同库；mcp_tokens 表）。没配则回落 JSON 文件 / 内存
+          - name: CCP_MCP_DATABASE_URL
+            value: "postgresql+psycopg://ccp:$(PGPASSWORD)@ccp-postgres:5432/ccp"
             - name: CCP_MCP_BACKEND
               value: "http://ccp-backend.ccp-system.svc:8010"
             - name: CCP_MCP_INTERNAL_KEY

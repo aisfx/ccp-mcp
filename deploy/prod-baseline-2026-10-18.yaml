@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    deployment.kubernetes.io/revision: "11"
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apps/v1","kind":"Deployment","metadata":{"annotations":{},"name":"ccp-mcp","namespace":"ccp-system"},"spec":{"replicas":2,"selector":{"matchLabels":{"app":"ccp-mcp"}},"template":{"metadata":{"labels":{"app":"ccp-mcp"}},"spec":{"containers":[{"env":[{"name":"CCP_MCP_BACKEND","value":"http://ccp-backend.ccp-system.svc:8010"},{"name":"CCP_MCP_INTERNAL_KEY","valueFrom":{"secretKeyRef":{"key":"key","name":"ccp-internal-key","optional":false}}},{"name":"CCP_MCP_DATA_PATH","value":"/data/tokens.json"}],"image":"reg.hpcweb.cc/ccp/ccp-mcp:v1.0.0","livenessProbe":{"httpGet":{"path":"/mcp","port":8020}},"name":"ccp-mcp","ports":[{"containerPort":8020,"name":"http"}],"readinessProbe":{"httpGet":{"path":"/mcp","port":8020}},"volumeMounts":[{"mountPath":"/data","name":"data"}]}],"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"ccp-mcp-data"}}]}}}}
+  creationTimestamp: "2026-10-16T14:37:34Z"
+  generation: 13
+  name: ccp-mcp
+  namespace: ccp-system
+  resourceVersion: "2827407"
+  uid: 38579a4f-38df-464f-a23f-8e3f4d8d4a4d
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 2
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: ccp-mcp
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: ccp-mcp
+    spec:
+      containers:
+      - env:
+        - name: CCP_MCP_BACKEND
+          value: http://ccp-backend.ccp-system.svc:8010
+        - name: CCP_MCP_INTERNAL_KEY
+          valueFrom:
+            secretKeyRef:
+              key: key
+              name: ccp-internal-key
+              optional: false
+        - name: CCP_MCP_DATA_PATH
+          value: /data/tokens.json
+        - name: CCP_MCP_DATABASE_URL
+          value: postgresql+psycopg://ccp:sQm3VkO0IpVg0bYd1mrAK7Pdhh4lE1l2@ccp-postgres:5432/ccp
+        image: reg.hpcweb.cc/ccp/ccp-mcp:v1.1.2
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8020
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: ccp-mcp
+        ports:
+        - containerPort: 8020
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8020
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /data
+          name: data
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: ccp-mcp-data
+status:
+  availableReplicas: 2
+  conditions:
+  - lastTransitionTime: "2026-10-17T01:48:28Z"
+    lastUpdateTime: "2026-10-17T01:48:28Z"
+    message: Deployment has minimum availability.
+    reason: MinimumReplicasAvailable
+    status: "True"
+    type: Available
+  - lastTransitionTime: "2026-10-16T14:54:14Z"
+    lastUpdateTime: "2026-10-17T01:52:01Z"
+    message: ReplicaSet "ccp-mcp-54fdd5dd9" has successfully progressed.
+    reason: NewReplicaSetAvailable
+    status: "True"
+    type: Progressing
+  observedGeneration: 13
+  readyReplicas: 2
+  replicas: 2
+  terminatingReplicas: 0
+  updatedReplicas: 2
